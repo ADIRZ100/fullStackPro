@@ -1,7 +1,12 @@
 package com.example.demo;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.math.BigDecimal;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.security.SecureRandom;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
@@ -76,6 +81,7 @@ public class LoginServerApplication {
     }
     public static void main(String[] args) {
         SpringApplication.run(LoginServerApplication.class, args);
+
 
     }
 
@@ -189,44 +195,16 @@ public BigDecimal calc(@RequestBody Map<String, Object> requestMap) {
         List<Map<String, Object>> householdProducts = (List<Map<String, Object>>) requestMap.get("householdProducts");
         List<Map<String, Object>> roomProducts = (List<Map<String, Object>>) requestMap.get("roomProducts");
 
-        List<String> products = new ArrayList<>();
-        List<Double> times = new ArrayList<>();
-
-        // Process the householdProducts
-        if (householdProducts != null) {
-            extractProductsAndTimes(householdProducts, products, times);
-        }
-
-        // Process the roomProducts
-        if (roomProducts != null) {
-            extractProductsAndTimes(roomProducts, products, times);
-        }
-
-        // Print the extracted products and times
-        System.out.println("Products: " + products);
-        System.out.println("Times: " + times);
-
         BigDecimal totalSum = BigDecimal.ZERO;
 
-        // Calculate the cost for each product in the householdProducts
-        for (String product : products) {
-            Query query1 = emCala.createQuery("SELECT e.costPerHourILS FROM HouseholdElectricalProducts e WHERE e.deviceType = :deviceType");
-            query1.setParameter("deviceType", product);
-            List<BigDecimal> costPerHourILS1 = query1.getResultList();
+        // Calculate cost for householdProducts
+        if (householdProducts != null) {
+            totalSum = totalSum.add(calculateTotalCost(householdProducts, "HouseholdElectricalProducts"));
+        }
 
-            // Sum up the costs from HouseholdElectricalProducts
-            for (BigDecimal cost : costPerHourILS1) {
-                totalSum = totalSum.add(cost);
-            }
-
-            Query query2 = emCala.createQuery("SELECT e.costPerHourILS FROM ElectricalProductsForRoom e WHERE e.deviceType = :deviceType");
-            query2.setParameter("deviceType", product);
-            List<BigDecimal> costPerHourILS2 = query2.getResultList();
-
-            // Sum up the costs from ElectricalProductsForRoom
-            for (BigDecimal cost : costPerHourILS2) {
-                totalSum = totalSum.add(cost);
-            }
+        // Calculate cost for roomProducts
+        if (roomProducts != null) {
+            totalSum = totalSum.add(calculateTotalCost(roomProducts, "ElectricalProductsForRoom"));
         }
 
         System.out.println("Total sum of costs: " + totalSum);
@@ -239,6 +217,36 @@ public BigDecimal calc(@RequestBody Map<String, Object> requestMap) {
         return null;
     }
 }
+
+private BigDecimal calculateTotalCost(List<Map<String, Object>> products, String tableName) {
+    BigDecimal totalCost = BigDecimal.ZERO;
+
+    for (Map<String, Object> product : products) {
+        String deviceType = (String) product.get("product");
+        Double timeUsed = null;
+        Object timeObj = product.get("time");
+        if (timeObj instanceof Integer) {
+            timeUsed = ((Integer) timeObj).doubleValue();
+        } else if (timeObj instanceof Double) {
+            timeUsed = (Double) timeObj;
+        }
+
+        if (deviceType != null && timeUsed != null) {
+            Query query = emCala.createQuery("SELECT e.costPerHourILS FROM " + tableName + " e WHERE e.deviceType = :deviceType");
+            query.setParameter("deviceType", deviceType);
+            List<BigDecimal> costPerHourILSList = query.getResultList();
+
+            for (BigDecimal costPerHourILS : costPerHourILSList) {
+                BigDecimal cost = costPerHourILS.multiply(BigDecimal.valueOf(timeUsed));
+                totalCost = totalCost.add(cost);
+            }
+        }
+    }
+
+    return totalCost;
+}
+
+
 
 // Helper method to extract products and times from a list of maps
 private void extractProductsAndTimes(List<Map<String, Object>> list, List<String> products, List<Double> times) {
@@ -257,9 +265,39 @@ private void extractProductsAndTimes(List<Map<String, Object>> list, List<String
         }
     }
 }
+    @PostMapping("/api/Login/Stocks")
+    public String getStock(@RequestBody String symbol) {
+        String apiKey = "3B1KBRZLU4ZN898U"; // Replace with your Alpha Vantage API key
 
+        try {
+            URL url = new URL("https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=" + symbol + "&interval=5min&apikey=" + apiKey);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Content-Type", "application/json");
 
+            int responseCode = conn.getResponseCode();
+            if (responseCode != HttpURLConnection.HTTP_OK) {
+                return "Failed : HTTP error code : " + responseCode;
+            }
+
+            BufferedReader in = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            String inputLine;
+            StringBuilder response = new StringBuilder();
+
+            while ((inputLine = in.readLine()) != null) {
+                response.append(inputLine);
+            }
+            in.close();
+
+            return response.toString();
+        } catch (IOException e) {
+            e.printStackTrace();
+            return "Error: " + e.getMessage();
+        }
+    }
 }
+
+
 
 
 
